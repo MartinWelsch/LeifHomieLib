@@ -1,59 +1,53 @@
 #include "HomieDevice.h"
 #include "HomieNode.h"
-void HomieLibDebugPrint(const char * szText);
+void HomieLibDebugPrint(const char *szText);
 
-#define csprintf(...) { char szTemp[256]; sprintf(szTemp,__VA_ARGS__ ); HomieLibDebugPrint(szTemp); }
-
-
-#if defined(ARDUINO_ARCH_ESP8266)
-#include <ESP8266WiFi.h>
-#else
-#include "WiFi.h"
-#endif
-
+#define csprintf(...)                 \
+	{                                 \
+		char szTemp[256];             \
+		sprintf(szTemp, __VA_ARGS__); \
+		HomieLibDebugPrint(szTemp);   \
+	}
 
 static std::vector<HomieDebugPrintCallback> vecDebugPrint;
 
-const int ipub_qos=1;
-const int sub_qos=2;
+const int ipub_qos = 1;
+const int sub_qos = 2;
 
 void HomieLibRegisterDebugPrintCallback(HomieDebugPrintCallback cb)
 {
 	vecDebugPrint.push_back(cb);
-
 }
 
-void HomieLibDebugPrint(const char * szText)
+void HomieLibDebugPrint(const char *szText)
 {
-	for(size_t i=0;i<vecDebugPrint.size();i++)
+	for (size_t i = 0; i < vecDebugPrint.size(); i++)
 	{
 		vecDebugPrint[i](szText);
 	}
-
 }
 
+HomieDevice *pToken = NULL;
 
-HomieDevice * pToken=NULL;
-
-bool AllowInitialPublishing(HomieDevice * pSource)
+bool AllowInitialPublishing(HomieDevice *pSource)
 {
-	if(pToken==pSource) return true;
-	if(!pToken)
+	if (pToken == pSource)
+		return true;
+	if (!pToken)
 	{
-		pToken=pSource;
+		pToken = pSource;
 		return true;
 	}
 	return false;
 }
 
-void FinishInitialPublishing(HomieDevice * pSource)
+void FinishInitialPublishing(HomieDevice *pSource)
 {
-	if(pToken==pSource)
+	if (pToken == pSource)
 	{
-		pToken=NULL;
+		pToken = NULL;
 	}
 }
-
 
 //#define HOMIELIB_VERBOSE
 
@@ -61,21 +55,20 @@ HomieDevice::HomieDevice()
 {
 }
 
-
 void HomieDevice::Init()
 {
 
-	strTopic=String("homie/")+strID;
-	strcpy(szWillTopic,String(strTopic+"/$state").c_str());
+	topic = String("homie/") + id;
+	strcpy(szWillTopic, String(topic + "/$state").c_str());
 
-	if(!vecNode.size())
+	if (!node.size())
 	{
-		HomieNode * pNode=NewNode();
+		HomieNode *pNode = NewNode();
 
-		pNode->strID="dummy";
-		pNode->strFriendlyName="No Nodes";
+		pNode->id = "dummy";
+		pNode->friendlyName = "No Nodes";
 
-/*
+		/*
  	 	lots of mqtt:homie300:srvrm-lightsense:dummy#dummy triggered in the log
 
   		HomieProperty * pProp=pNode->NewProperty();
@@ -83,37 +76,43 @@ void HomieDevice::Init()
 		pProp->strFriendlyName="No Properties";
 		pProp->bRetained=false;
 		pProp->datatype=homieString;*/
-
 	}
 
-	for(size_t a=0;a<vecNode.size();a++)
+	for (size_t a = 0; a < node.size(); a++)
 	{
-		vecNode[a]->Init();
+		node[a]->Init();
 	}
 
+	if (this->useIp)
+	{
+		mqtt.setServer(this->mqttServerIp, this->mqttServerPort);
+	}
+	else
+	{
+		mqtt.setServer(this->mqttServerHost, this->mqttServerPort);
+	}
 
-	IPAddress ip;
-	ip.fromString(strMqttServerIP);
-	//ip.fromString("172.22.22.99");
-	mqtt.setServer(ip,1883);//1883
-	mqtt.setCredentials(strMqttUserName.c_str(), strMqttPassword.c_str());
+	if (this->mqttUsername != NULL && this->mqttPassword != NULL)
+	{
+		mqtt.setCredentials(this->mqttUsername, this->mqttPassword);
+	}
 
-	mqtt.setWill(szWillTopic,2,true,"lost");
+	mqtt.setWill(szWillTopic, 2, true, "lost");
 
 	mqtt.onConnect(std::bind(&HomieDevice::onConnect, this, std::placeholders::_1));
 	mqtt.onDisconnect(std::bind(&HomieDevice::onDisconnect, this, std::placeholders::_1));
 	mqtt.onMessage(std::bind(&HomieDevice::onMqttMessage, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6));
 
-	bSendError=false;
+	sendError = false;
 
-	bInitialized=true;
+	initialized = true;
 }
 
 void HomieDevice::Quit()
 {
-	Publish(String(strTopic+"/$state").c_str(), 1, true, "disconnected");
+	Publish(String(topic + "/$state").c_str(), 1, true, "disconnected");
 	mqtt.disconnect(false);
-	bInitialized=false;
+	initialized = false;
 }
 
 bool HomieDevice::IsConnected()
@@ -121,178 +120,173 @@ bool HomieDevice::IsConnected()
 	return mqtt.connected();
 }
 
-
-int iWiFiRSSI=0;
+int iWiFiRSSI = 0;
 
 void HomieDevice::Loop()
 {
-	if(!bInitialized) return;
+	if (!initialized)
+		return;
 
-	bool bEvenSecond=false;
+	bool bEvenSecond = false;
 
-	if((int) (millis()-ulLastLoopSecondCounterTimestamp)>=1000)
+	if ((int)(millis() - lastLoopSecondCounterTimestamp) >= 1000)
 	{
-		ulLastLoopSecondCounterTimestamp+=1000;
-		ulSecondCounter_Uptime++;
-		ulSecondCounter_WiFi++;
-		ulSecondCounter_MQTT++;
+		lastLoopSecondCounterTimestamp += 1000;
+		secondCounter_Uptime++;
+		secondCounter_WiFi++;
+		secondCounter_MQTT++;
 
-
-		if(bRapidUpdateRSSI && (ulSecondCounter_Uptime & 1))
+		if (bRapidUpdateRSSI && (secondCounter_Uptime & 1))
 		{
-			int iWiFiRSSI_Current=WiFi.RSSI();
-			if(iWiFiRSSI!=iWiFiRSSI_Current)
+			int iWiFiRSSI_Current = WiFi.RSSI();
+			if (iWiFiRSSI != iWiFiRSSI_Current)
 			{
-				iWiFiRSSI=iWiFiRSSI_Current;
+				iWiFiRSSI = iWiFiRSSI_Current;
 
-				Publish(String(strTopic+"/$stats/signal").c_str(), 2, true, String(iWiFiRSSI).c_str());
+				Publish(String(topic + "/$stats/signal").c_str(), 2, true, String(iWiFiRSSI).c_str());
 			}
 		}
 
-		bEvenSecond=true;
+		bEvenSecond = true;
 	}
 
+	bool bEvenDeciSecond = false;
 
-	bool bEvenDeciSecond=false;
-
-	if((int) (millis()-ulLastLoopDeciSecondCounterTimestamp)>=100)
+	if ((int)(millis() - lastLoopDeciSecondCounterTimestamp) >= 100)
 	{
-		ulLastLoopDeciSecondCounterTimestamp+=100;
-		bEvenDeciSecond=true;
+		lastLoopDeciSecondCounterTimestamp += 100;
+		bEvenDeciSecond = true;
 	}
 
-	if(!bEvenDeciSecond) return;
+	if (!bEvenDeciSecond)
+		return;
 
-	if(bEvenSecond)
+	if (bEvenSecond)
 	{
 	}
 
-	if(WiFi.status() != WL_CONNECTED)
+	if (WiFi.status() != WL_CONNECTED)
 	{
-		ulSecondCounter_WiFi=0;
-		ulSecondCounter_MQTT=0;
+		secondCounter_WiFi = 0;
+		secondCounter_MQTT = 0;
 		return;
 	}
 
-	if(mqtt.connected())
+	if (mqtt.connected())
 	{
 
 		DoInitialPublishing();
 
-//		pubsubClient.loop();
-		ulMqttReconnectCount=0;
+		//		pubsubClient.loop();
+		mqttReconnectCount = 0;
 
-		if((int) (millis()-ulHomieStatsTimestamp)>=30000)
+		if ((int)(millis() - homieStatsTimestamp) >= 30000)
 		{
-			bool bError=false;
+			bool bError = false;
 
-			if(bInitialPublishingDone)
+			if (initialPublishingDone)
 			{
-				bError |= 0==Publish(String(strTopic+"/$state").c_str(), ipub_qos, true, "ready");	//re-publish ready every time we update stats
+				bError |= 0 == Publish(String(topic + "/$state").c_str(), ipub_qos, true, "ready"); //re-publish ready every time we update stats
 			}
 
-			bError |= 0==Publish(String(strTopic+"/$stats/uptime").c_str(), 2, true, String(ulSecondCounter_Uptime).c_str());
-			bError |= 0==Publish(String(strTopic+"/$stats/uptime-wifi").c_str(), 2, true, String(ulSecondCounter_WiFi).c_str());
-			bError |= 0==Publish(String(strTopic+"/$stats/uptime-mqtt").c_str(), 2, true, String(ulSecondCounter_MQTT).c_str());
-			bError |= 0==Publish(String(strTopic+"/$stats/signal").c_str(), 2, true, String(WiFi.RSSI()).c_str());
+			bError |= 0 == Publish(String(topic + "/$stats/uptime").c_str(), 2, true, String(secondCounter_Uptime).c_str());
+			bError |= 0 == Publish(String(topic + "/$stats/uptime-wifi").c_str(), 2, true, String(secondCounter_WiFi).c_str());
+			bError |= 0 == Publish(String(topic + "/$stats/uptime-mqtt").c_str(), 2, true, String(secondCounter_MQTT).c_str());
+			bError |= 0 == Publish(String(topic + "/$stats/signal").c_str(), 2, true, String(WiFi.RSSI()).c_str());
 
-			if(bError)
+			if (bError)
 			{
-				ulHomieStatsTimestamp=millis()-(30000-GetErrorRetryFrequency());	//retry in a while
+				homieStatsTimestamp = millis() - (30000 - GetErrorRetryFrequency()); //retry in a while
 			}
 			else
 			{
-				ulHomieStatsTimestamp=millis();
+				homieStatsTimestamp = millis();
 			}
 
-//			csprintf("Periodic publishing: %i, %i, %i\n",pub_return[0],pub_return[1],pub_return[2]);
+			//			csprintf("Periodic publishing: %i, %i, %i\n",pub_return[0],pub_return[1],pub_return[2]);
 		}
 
-		if(bDoPublishDefaults && (int) (millis()-ulPublishDefaultsTimestamp)>0)
+		if (doPublishDefaults && (int)(millis() - publishDefaultsTimestamp) > 0)
 		{
-			bDoPublishDefaults=0;
+			doPublishDefaults = 0;
 
-			for(size_t a=0;a<vecNode.size();a++)
+			for (size_t a = 0; a < node.size(); a++)
 			{
-				vecNode[a]->PublishDefaults();
+				node[a]->PublishDefaults();
 			}
 		}
-
 	}
 	else
 	{
 
 		//csprintf("not connected. bConnecting=%i\n",bConnecting);
 
-		ulSecondCounter_MQTT=0;
+		secondCounter_MQTT = 0;
 
-		ulHomieStatsTimestamp=millis()-1000000;
+		homieStatsTimestamp = millis() - 1000000;
 
-		if(!bConnecting)
+		if (!connecting)
 		{
 
 			//csprintf("millis()-ulLastReconnect=%i  interval=%i\n",millis()-ulLastReconnect,interval);
 
-			if(!ulLastReconnect || (millis()-ulLastReconnect)>GetReconnectInterval())
+			if (!lastReconnect || (millis() - lastReconnect) > GetReconnectInterval())
 			{
 
-				csprintf("Connecting to MQTT server %s...\n",strMqttServerIP.c_str());
-				bConnecting=true;
-				bSendError=false;
-				bInitialPublishingDone=false;
+				csprintf("Connecting to MQTT server %s...\n", strMqttServerIP.c_str());
+				connecting = true;
+				sendError = false;
+				initialPublishingDone = false;
 
-				ulConnectTimestamp=millis();
+				connectTimestamp = millis();
 				mqtt.connect();
 			}
 		}
 		else
 		{
 			//if we're still not connected after a minute, try again
-			if(!ulConnectTimestamp || (millis()-ulConnectTimestamp)>60000)
+			if (!connectTimestamp || (millis() - connectTimestamp) > 60000)
 			{
 				csprintf("Reconnect needed, dangling flag\n");
 				mqtt.disconnect(true);
-				bConnecting=false;
+				connecting = false;
 			}
-
 		}
 	}
-
 }
 
 void HomieDevice::onConnect(bool sessionPresent)
 {
-	if(sessionPresent)	//squelch unused parameter warning
+	if (sessionPresent) //squelch unused parameter warning
 	{
 	}
 #ifdef HOMIELIB_VERBOSE
-	csprintf("onConnect... %p\n",this);
+	csprintf("onConnect... %p\n", this);
 #endif
-	bConnecting=false;
+	connecting = false;
 
-	bDoInitialPublishing=true;
-	iInitialPublishing=0;
-	iInitialPublishing_Node=0;
-	iInitialPublishing_Prop=0;
-	iPubCount_Props=0;
+	doInitialPublishing = true;
+	initialPublishing = 0;
+	initialPublishing_Node = 0;
+	initialPublishing_Prop = 0;
+	pubCount_Props = 0;
 
-	ulSecondCounter_MQTT=0;
-
+	secondCounter_MQTT = 0;
 }
 
 void HomieDevice::onDisconnect(AsyncMqttClientDisconnectReason reason)
 {
-	if(reason==AsyncMqttClientDisconnectReason::TCP_DISCONNECTED)
+	if (reason == AsyncMqttClientDisconnectReason::TCP_DISCONNECTED)
 	{
 	}
 	//csprintf("onDisconnect...");
-	if(bConnecting)
+	if (connecting)
 	{
-		ulLastReconnect=millis();
-		ulMqttReconnectCount++;
-		bConnecting=false;
+		lastReconnect = millis();
+		mqttReconnectCount++;
+		connecting = false;
 		//csprintf("onDisconnect...   reason %i.. lr=%lu\n",reason,ulLastReconnect);
-		csprintf("MQTT server connection failed. Retrying in %lums\n",GetReconnectInterval());
+		csprintf("MQTT server connection failed. Retrying in %lums\n", GetReconnectInterval());
 	}
 	else
 	{
@@ -300,362 +294,356 @@ void HomieDevice::onDisconnect(AsyncMqttClientDisconnectReason reason)
 	}
 }
 
-void HomieDevice::onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total)
+void HomieDevice::onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total)
 {
-	String strTopic=topic;
-	_map_incoming::const_iterator citer=mapIncoming.find(strTopic);
+	String strTopic = topic;
+	_map_incoming::const_iterator citer = incoming.find(strTopic);
 
-	if(citer!=mapIncoming.end())
+	if (citer != incoming.end())
 	{
-		HomieProperty * pProp=citer->second;
-		if(pProp)
+		HomieProperty *pProp = citer->second;
+		if (pProp)
 		{
 
 			pProp->OnMqttMessage(topic, payload, properties, len, index, total);
-
 		}
 	}
-
 
 	//csprintf("RECEIVED %s %s\n",topic,payload);
 }
 
-
-HomieNode * HomieDevice::NewNode()
+HomieNode *HomieDevice::NewNode()
 {
-	HomieNode * ret=new HomieNode;
-	vecNode.push_back(ret);
-	ret->pParent=this;
+	HomieNode *ret = new HomieNode;
+	node.push_back(ret);
+	ret->parent = this;
 
 	return ret;
 }
 
-
 void HomieDevice::HandleInitialPublishingError()
 {
-	csprintf("Initial publishing error at stage %i, retrying in %i\n",iInitialPublishing,GetErrorRetryFrequency());
+	csprintf("Initial publishing error at stage %i, retrying in %i\n", initialPublishing, GetErrorRetryFrequency());
 
-	ulInitialPublishing=millis()+GetErrorRetryFrequency();
+	initialPublishing = millis() + GetErrorRetryFrequency();
 }
 
 void HomieDevice::DoInitialPublishing()
 {
-	if(!bDoInitialPublishing)
+	if (!doInitialPublishing)
 	{
-		iInitialPublishing=0;
-		ulInitialPublishing=0;
+		initialPublishing = 0;
+		initialPublishing = 0;
 		return;
 	}
 
-	if(ulInitialPublishing!=0 && (int) (millis()-ulInitialPublishing)<iInitialPublishingThrottle_ms)
+	if (initialPublishing != 0 && (int)(millis() - initialPublishing) < iInitialPublishingThrottle_ms)
 	{
 		return;
 	}
 
-	if(!ulInitialPublishing)
+	if (!initialPublishing)
 	{
-		csprintf("%s MQTT Initial Publishing...\n",strTopic.c_str());
-		iPubCount_Props=0;
+		csprintf("%s MQTT Initial Publishing...\n", topic.c_str());
+		pubCount_Props = 0;
 	}
 
-	ulInitialPublishing=millis();
+	initialPublishing = millis();
 
-
-	if(!AllowInitialPublishing(this)) return;
-
+	if (!AllowInitialPublishing(this))
+		return;
 
 #ifdef HOMIELIB_VERBOSE
-	if(bDebug) csprintf("IPUB: %i        Node=%i  Prop=%i\n",iInitialPublishing, iInitialPublishing_Node, iInitialPublishing_Prop);
+	if (debug)
+		csprintf("IPUB: %i        Node=%i  Prop=%i\n", initialPublishing, initialPublishing_Node, initialPublishing_Prop);
 #endif
 
-
-	if(iInitialPublishing==0)
+	if (initialPublishing == 0)
 	{
-		bool bError=false;
-		bError |= 0==Publish(String(strTopic+"/$state").c_str(), ipub_qos, true, "init");
-		bError |= 0==Publish(String(strTopic+"/$homie").c_str(), ipub_qos, true, "3.0.1");
-		bError |= 0==Publish(String(strTopic+"/$name").c_str(), ipub_qos, true, strFriendlyName.c_str());
-		if(bError)
+		bool bError = false;
+		bError |= 0 == Publish(String(topic + "/$state").c_str(), ipub_qos, true, "init");
+		bError |= 0 == Publish(String(topic + "/$homie").c_str(), ipub_qos, true, "3.0.1");
+		bError |= 0 == Publish(String(topic + "/$name").c_str(), ipub_qos, true, friendlyName.c_str());
+		if (bError)
 		{
 			HandleInitialPublishingError();
 		}
 		else
 		{
-			iInitialPublishing=1;
+			initialPublishing = 1;
 		}
 		return;
 	}
 
-	if(iInitialPublishing==1)
+	if (initialPublishing == 1)
 	{
-		bool bError=false;
-		bError |= 0==Publish(String(strTopic+"/$localip").c_str(), ipub_qos, true, WiFi.localIP().toString().c_str());
-		bError |= 0==Publish(String(strTopic+"/$mac").c_str(), ipub_qos, true, WiFi.macAddress().c_str());
-		bError |= 0==Publish(String(strTopic+"/$extensions").c_str(), ipub_qos, true, "");
+		bool bError = false;
+		bError |= 0 == Publish(String(topic + "/$localip").c_str(), ipub_qos, true, WiFi.localIP().toString().c_str());
+		bError |= 0 == Publish(String(topic + "/$mac").c_str(), ipub_qos, true, WiFi.macAddress().c_str());
+		bError |= 0 == Publish(String(topic + "/$extensions").c_str(), ipub_qos, true, "");
 
-		if(bError)
+		if (bError)
 		{
 			HandleInitialPublishingError();
 		}
 		else
 		{
-			iInitialPublishing=2;
+			initialPublishing = 2;
 		}
 		return;
 	}
 
-	if(iInitialPublishing==2)
+	if (initialPublishing == 2)
 	{
-		bool bError=false;
+		bool bError = false;
 
-		bError |= 0==Publish(String(strTopic+"/$stats").c_str(), ipub_qos, true, "uptime,signal,uptime-wifi,uptime-mqtt");
-		bError |= 0==Publish(String(strTopic+"/$stats/interval").c_str(), ipub_qos, true, "60");
+		bError |= 0 == Publish(String(topic + "/$stats").c_str(), ipub_qos, true, "uptime,signal,uptime-wifi,uptime-mqtt");
+		bError |= 0 == Publish(String(topic + "/$stats/interval").c_str(), ipub_qos, true, "60");
 
 		String strNodes;
-		for(size_t i=0;i<vecNode.size();i++)
+		for (size_t i = 0; i < node.size(); i++)
 		{
-			strNodes+=vecNode[i]->strID;
-			if(i<vecNode.size()-1) strNodes+=",";
+			strNodes += node[i]->id;
+			if (i < node.size() - 1)
+				strNodes += ",";
 		}
 
 #ifdef HOMIELIB_VERBOSE
-		if(bDebug) csprintf("NODES: %s\n",strNodes.c_str());
+		if (debug)
+			csprintf("NODES: %s\n", strNodes.c_str());
 #endif
 
-		bError |= 0==Publish(String(strTopic+"/$nodes").c_str(), ipub_qos, true, strNodes.c_str());
+		bError |= 0 == Publish(String(topic + "/$nodes").c_str(), ipub_qos, true, strNodes.c_str());
 
-		if(bError)
+		if (bError)
 		{
 			HandleInitialPublishingError();
 		}
 		else
 		{
-			iInitialPublishing_Node=0;
-			iInitialPublishing=3;
+			initialPublishing_Node = 0;
+			initialPublishing = 3;
 		}
 		return;
 	}
 
-
-	if(iInitialPublishing==3)
+	if (initialPublishing == 3)
 	{
-		bool bError=false;
-		int i=iInitialPublishing_Node;
-		if(i<(int) vecNode.size())
+		bool bError = false;
+		int i = initialPublishing_Node;
+		if (i < (int)node.size())
 		{
-			HomieNode & node=*vecNode[i];
+			HomieNode &node = *node[i];
 #ifdef HOMIELIB_VERBOSE
-			if(bDebug) csprintf("NODE %i: %s\n",i,node.strFriendlyName.c_str());
+			if (debug)
+				csprintf("NODE %i: %s\n", i, node.friendlyName.c_str());
 #endif
 
-			bError |= 0==Publish(String(node.strTopic+"/$name").c_str(), ipub_qos, true, node.strFriendlyName.c_str());
-			bError |= 0==Publish(String(node.strTopic+"/$type").c_str(), ipub_qos, true, node.strType.c_str());
+			bError |= 0 == Publish(String(node.topic + "/$name").c_str(), ipub_qos, true, node.friendlyName.c_str());
+			bError |= 0 == Publish(String(node.topic + "/$type").c_str(), ipub_qos, true, node.type.c_str());
 
 			String strProperties;
-			for(size_t j=0;j<node.vecProperty.size();j++)
+			for (size_t j = 0; j < node.vecProperty.size(); j++)
 			{
-				strProperties+=node.vecProperty[j]->strID;
-				if(j<node.vecProperty.size()-1) strProperties+=",";
+				strProperties += node.vecProperty[j]->id;
+				if (j < node.vecProperty.size() - 1)
+					strProperties += ",";
 			}
 
 #ifdef HOMIELIB_VERBOSE
-			if(bDebug) csprintf("NODE %i: %s has properties %s\n",i,node.strFriendlyName.c_str(),strProperties.c_str());
+			if (debug)
+				csprintf("NODE %i: %s has properties %s\n", i, node.friendlyName.c_str(), strProperties.c_str());
 #endif
 
-			bError |= 0==Publish(String(node.strTopic+"/$properties").c_str(), ipub_qos, true, strProperties.c_str());
+			bError |= 0 == Publish(String(node.topic + "/$properties").c_str(), ipub_qos, true, strProperties.c_str());
 
-			if(bError)
+			if (bError)
 			{
 				HandleInitialPublishingError();
 			}
 			else
 			{
-				iInitialPublishing_Node++;
+				initialPublishing_Node++;
 			}
 
 			return;
 		}
 
-		if(i>=(int) vecNode.size())
+		if (i >= (int)node.size())
 		{
-			iInitialPublishing=4;
-			iInitialPublishing_Node=0;
-			iInitialPublishing_Prop=0;
+			initialPublishing = 4;
+			initialPublishing_Node = 0;
+			initialPublishing_Prop = 0;
 		}
 	}
 
-	if(iInitialPublishing==4)
+	if (initialPublishing == 4)
 	{
-		bool bError=false;
-		int i=iInitialPublishing_Node;
+		bool bError = false;
+		int i = initialPublishing_Node;
 
-		if(i<(int) vecNode.size())
+		if (i < (int)node.size())
 		{
-			HomieNode & node=*vecNode[i];
+			HomieNode &node = *node[i];
 #ifdef HOMIELIB_VERBOSE
-			if(bDebug) csprintf("NODE %i: %s\n",i,node.strFriendlyName.c_str());
+			if (debug)
+				csprintf("NODE %i: %s\n", i, node.friendlyName.c_str());
 #endif
 
-			int j=iInitialPublishing_Prop;
-			if(j<(int) node.vecProperty.size())
+			int j = initialPublishing_Prop;
+			if (j < (int)node.vecProperty.size())
 			{
-				HomieProperty & prop=*node.vecProperty[j];
+				HomieProperty &prop = *node.vecProperty[j];
 
 #ifdef HOMIELIB_VERBOSE
-				if(bDebug) csprintf("NODE %i: %s property %s\n",i,node.strFriendlyName.c_str(),prop.strFriendlyName.c_str());
+				if (debug)
+					csprintf("NODE %i: %s property %s\n", i, node.friendlyName.c_str(), prop.friendlyName.c_str());
 #endif
 
-				if(prop.bStandardMQTT)
+				if (prop.standardMQTT)
 				{
-	#ifdef HOMIELIB_VERBOSE
-					csprintf("SUBSCRIBING to MQTT topic %s\n",prop.strTopic.c_str());
-	#endif
-					bError |= 0==mqtt.subscribe(prop.strTopic.c_str(), sub_qos);
-					mapIncoming[prop.strTopic]=&prop;
+#ifdef HOMIELIB_VERBOSE
+					csprintf("SUBSCRIBING to MQTT topic %s\n", prop.topic.c_str());
+#endif
+					bError |= 0 == mqtt.subscribe(prop.topic.c_str(), sub_qos);
+					incoming[prop.topic] = &prop;
 				}
 				else
 				{
 
-					bError |= 0==Publish(String(prop.strTopic+"/$name").c_str(), ipub_qos, true, prop.strFriendlyName.c_str());
-					bError |= 0==Publish(String(prop.strTopic+"/$settable").c_str(), ipub_qos, true, prop.bSettable?"true":"false");
-					bError |= 0==Publish(String(prop.strTopic+"/$retained").c_str(), ipub_qos, true, prop.bRetained?"true":"false");
-					bError |= 0==Publish(String(prop.strTopic+"/$datatype").c_str(), ipub_qos, true, GetHomieDataTypeText(prop.datatype));
-					if(prop.strUnit.length())
+					bError |= 0 == Publish(String(prop.topic + "/$name").c_str(), ipub_qos, true, prop.friendlyName.c_str());
+					bError |= 0 == Publish(String(prop.topic + "/$settable").c_str(), ipub_qos, true, prop.settable ? "true" : "false");
+					bError |= 0 == Publish(String(prop.topic + "/$retained").c_str(), ipub_qos, true, prop.retained ? "true" : "false");
+					bError |= 0 == Publish(String(prop.topic + "/$datatype").c_str(), ipub_qos, true, GetHomieDataTypeText(prop.datatype));
+					if (prop.unit.length())
 					{
-						bError |= 0==Publish(String(prop.strTopic+"/$unit").c_str(), ipub_qos, true, prop.strUnit.c_str());
+						bError |= 0 == Publish(String(prop.topic + "/$unit").c_str(), ipub_qos, true, prop.unit.c_str());
 					}
-					if(prop.strFormat.length())
+					if (prop.strFormat.length())
 					{
-						bError |= 0==Publish(String(prop.strTopic+"/$format").c_str(), ipub_qos, true, prop.strFormat.c_str());
+						bError |= 0 == Publish(String(prop.topic + "/$format").c_str(), ipub_qos, true, prop.strFormat.c_str());
 					}
 
-					if(prop.bSettable)
+					if (prop.settable)
 					{
-						mapIncoming[prop.strTopic]=&prop;
-						mapIncoming[prop.strSetTopic]=&prop;
-						if(prop.bRetained)
+						incoming[prop.topic] = &prop;
+						incoming[prop.setTopic] = &prop;
+						if (prop.retained)
 						{
-	#ifdef HOMIELIB_VERBOSE
-							csprintf("SUBSCRIBING to %s\n",prop.strTopic.c_str());
-	#endif
-							bError |= 0==mqtt.subscribe(prop.strTopic.c_str(), sub_qos);
+#ifdef HOMIELIB_VERBOSE
+							csprintf("SUBSCRIBING to %s\n", prop.topic.c_str());
+#endif
+							bError |= 0 == mqtt.subscribe(prop.topic.c_str(), sub_qos);
 						}
-	#ifdef HOMIELIB_VERBOSE
-						csprintf("SUBSCRIBING to %s\n",prop.strSetTopic.c_str());
-	#endif
-						bError |= 0==mqtt.subscribe(prop.strSetTopic.c_str(), sub_qos);
+#ifdef HOMIELIB_VERBOSE
+						csprintf("SUBSCRIBING to %s\n", prop.setTopic.c_str());
+#endif
+						bError |= 0 == mqtt.subscribe(prop.setTopic.c_str(), sub_qos);
 					}
 					else
 					{
-						bError |= false==prop.Publish();
+						bError |= false == prop.Publish();
 					}
 				}
 
-
-
-
-				if(bError)
+				if (bError)
 				{
 					HandleInitialPublishingError();
 				}
 				else
 				{
-					iInitialPublishing_Prop++;
-					iPubCount_Props++;
+					initialPublishing_Prop++;
+					pubCount_Props++;
 				}
 
 				return;
 			}
 
-			if(j>=(int) node.vecProperty.size())
+			if (j >= (int)node.vecProperty.size())
 			{
-				iInitialPublishing_Prop=0;
-				iInitialPublishing_Node++;
+				initialPublishing_Prop = 0;
+				initialPublishing_Node++;
 			}
 		}
 
-		if(iInitialPublishing_Node>=(int) vecNode.size())
+		if (initialPublishing_Node >= (int)node.size())
 		{
-			iInitialPublishing_Node=0;
-			iInitialPublishing_Prop=0;
-			iInitialPublishing=5;
+			initialPublishing_Node = 0;
+			initialPublishing_Prop = 0;
+			initialPublishing = 5;
 		}
-
 	}
 
-	if(iInitialPublishing==5)
+	if (initialPublishing == 5)
 	{
-		bool bError=false;
-		bError |= 0==Publish(String(strTopic+"/$state").c_str(), ipub_qos, true, "ready");
+		bool bError = false;
+		bError |= 0 == Publish(String(topic + "/$state").c_str(), ipub_qos, true, "ready");
 
-		if(bError)
+		if (bError)
 		{
 			HandleInitialPublishingError();
 		}
 		else
 		{
-			bDoInitialPublishing=false;
-			csprintf("Initial publishing complete. %i nodes, %i properties\n",vecNode.size(),iPubCount_Props);
+			doInitialPublishing = false;
+			csprintf("Initial publishing complete. %i nodes, %i properties\n", node.size(), pubCount_Props);
 			FinishInitialPublishing(this);
 
-			bInitialPublishingDone=true;
+			initialPublishingDone = true;
 
-			ulPublishDefaultsTimestamp=millis()+5000;
-			bDoPublishDefaults=true;
+			publishDefaultsTimestamp = millis() + 5000;
+			doPublishDefaults = true;
 		}
-
 	}
-
 }
 
-uint16_t HomieDevice::PublishDirect(const String & topic, uint8_t qos, bool retain, const String & payload)
+uint16_t HomieDevice::PublishDirect(const String &topic, uint8_t qos, bool retain, const String &payload)
 {
 	return mqtt.publish(topic.c_str(), qos, retain, payload.c_str(), payload.length());
 }
 
-bool bFailPublish=false;
+bool bFailPublish = false;
 
-uint16_t HomieDevice::Publish(const char* topic, uint8_t qos, bool retain, const char* payload, size_t length, bool dup, uint16_t message_id)
+uint16_t HomieDevice::Publish(const char *topic, uint8_t qos, bool retain, const char *payload, size_t length, bool dup, uint16_t message_id)
 {
-	if(!IsConnected()) return 0;
-	uint16_t ret=0;
+	if (!IsConnected())
+		return 0;
+	uint16_t ret = 0;
 
-	if(!bFailPublish)
+	if (!bFailPublish)
 	{
-		ret=mqtt.publish(topic,qos,retain,payload,length,dup,message_id);
+		ret = mqtt.publish(topic, qos, retain, payload, length, dup, message_id);
 	}
 
 	//csprintf("Publish %s: ret %i\n",topic,ret);
 
-	if(!ret)
-	{	//failure
-		if(!bSendError)
+	if (!ret)
+	{ //failure
+		if (!sendError)
 		{
-			bSendError=true;
-			ulSendErrorTimestamp=millis();
+			sendError = true;
+			sendErrorTimestamp = millis();
 		}
 		else
 		{
-			if((int) (millis()-ulSendErrorTimestamp) > 60000)	//a full minute with no successes
+			if ((int)(millis() - sendErrorTimestamp) > 60000) //a full minute with no successes
 			{
 				csprintf("Full minute with no publish successes, disconnect and try again\n");
 				mqtt.disconnect(true);
-				bSendError=false;
-				bConnecting=false;
+				sendError = false;
+				connecting = false;
 			}
 		}
 	}
 	else
-	{	//success
-		bSendError=false;
-
+	{ //success
+		sendError = false;
 	}
 
 	return ret;
 }
 
-
-String HomieDeviceName(const char * in)
+String HomieDeviceName(const char *in)
 {
 	String ret;
 
@@ -667,83 +655,115 @@ String HomieDeviceName(const char * in)
 		last_number,
 	};
 
-	eLast last=last_hyphen;
+	eLast last = last_hyphen;
 
-	while(*in)
+	while (*in)
 	{
-		char input=*in++;
+		char input = *in++;
 
-		if(input>='0' && input<='9')
+		if (input >= '0' && input <= '9')
 		{
-			ret+=input;
-			last=last_number;
+			ret += input;
+			last = last_number;
 		}
-		else if(input>='A' && input<='Z')
+		else if (input >= 'A' && input <= 'Z')
 		{
-			if(last==last_lower)
+			if (last == last_lower)
 			{
-				ret+='-';
+				ret += '-';
 			}
 
-			ret+=(char) (input | 0x20);
+			ret += (char)(input | 0x20);
 
-			last=last_upper;
+			last = last_upper;
 		}
-		else if(input>='a' && input<='z')
+		else if (input >= 'a' && input <= 'z')
 		{
-			ret+=input;
-			last=last_lower;
+			ret += input;
+			last = last_lower;
 		}
 		else
 		{
-			if(last!=last_hyphen)
+			if (last != last_hyphen)
 			{
-				ret+="-";
+				ret += "-";
 			}
 
-			last=last_hyphen;
+			last = last_hyphen;
 		}
-
 	}
 
 	return ret;
 }
 
-bool HomieParseRGB(const char * in, uint32_t & rgb)
+bool HomieParseRGB(const char *in, uint32_t &rgb)
 {
 	int r, g, b;
 
 	if (sscanf(in, "%d,%d,%d", &r, &g, &b) == 3)
 	{
-		rgb=(r<<16) + (g<<8) + (b<<0);
+		rgb = (r << 16) + (g << 8) + (b << 0);
 		return true;
 	}
 	return false;
 }
 
-
-void HSVtoRGB(float fHueIn, float fSatIn, float fBriteIn, float & fRedOut, float & fGreenOut, float & fBlueOut)
+void HSVtoRGB(float fHueIn, float fSatIn, float fBriteIn, float &fRedOut, float &fGreenOut, float &fBlueOut)
 {
-	float fHue = (float) fmod(fHueIn / 6.0f, 60);
+	float fHue = (float)fmod(fHueIn / 6.0f, 60);
 	float fC = fBriteIn * fSatIn;
 	float fL = fBriteIn - fC;
-	float fX = (float) (fC * (1.0f - fabs(fmod(fHue * 0.1f, 2.0f) - 1.0f)));
+	float fX = (float)(fC * (1.0f - fabs(fmod(fHue * 0.1f, 2.0f) - 1.0f)));
 
-	if(fHue >= 0.0f && fHue < 10.0f) { fRedOut = fC; fGreenOut = fX; fBlueOut = 0; }
-	else if(fHue >= 10.0f && fHue < 20.0f) { fRedOut = fX; fGreenOut = fC; fBlueOut = 0; }
-	else if(fHue >= 20.0f && fHue < 30.0f) { fRedOut = 0; fGreenOut = fC; fBlueOut = fX; }
-	else if(fHue >= 30.0f && fHue < 40.0f) { fRedOut = 0; fGreenOut = fX; fBlueOut = fC; }
-	else if(fHue >= 40.0f && fHue < 50.0f) { fRedOut = fX; fGreenOut = 0; fBlueOut = fC; }
-	else if(fHue >= 50.0f && fHue < 60.0f) { fRedOut = fC; fGreenOut = 0; fBlueOut = fX; }
-	else { fRedOut = 0; fGreenOut = 0; fBlueOut = 0; }
+	if (fHue >= 0.0f && fHue < 10.0f)
+	{
+		fRedOut = fC;
+		fGreenOut = fX;
+		fBlueOut = 0;
+	}
+	else if (fHue >= 10.0f && fHue < 20.0f)
+	{
+		fRedOut = fX;
+		fGreenOut = fC;
+		fBlueOut = 0;
+	}
+	else if (fHue >= 20.0f && fHue < 30.0f)
+	{
+		fRedOut = 0;
+		fGreenOut = fC;
+		fBlueOut = fX;
+	}
+	else if (fHue >= 30.0f && fHue < 40.0f)
+	{
+		fRedOut = 0;
+		fGreenOut = fX;
+		fBlueOut = fC;
+	}
+	else if (fHue >= 40.0f && fHue < 50.0f)
+	{
+		fRedOut = fX;
+		fGreenOut = 0;
+		fBlueOut = fC;
+	}
+	else if (fHue >= 50.0f && fHue < 60.0f)
+	{
+		fRedOut = fC;
+		fGreenOut = 0;
+		fBlueOut = fX;
+	}
+	else
+	{
+		fRedOut = 0;
+		fGreenOut = 0;
+		fBlueOut = 0;
+	}
 
 	fRedOut += fL;
 	fGreenOut += fL;
 	fBlueOut += fL;
 }
 
-
-bool HomieParseHSV(const char * in, uint32_t & rgb)
+bool HomieParseHSV(const char *in, uint32_t &rgb)
 {
 	int h, s, v;
 
@@ -751,31 +771,33 @@ bool HomieParseHSV(const char * in, uint32_t & rgb)
 	{
 		float fR, fG, fB;
 
-		HSVtoRGB(h, s*0.01f, v*0.01f,fR, fG, fB);
+		HSVtoRGB(h, s * 0.01f, v * 0.01f, fR, fG, fB);
 
-		int r=fR*256.0f;
-		int g=fG*256.0f;
-		int b=fB*256.0f;
+		int r = fR * 256.0f;
+		int g = fG * 256.0f;
+		int b = fB * 256.0f;
 
-		if(r>255) r=255;
-		if(g>255) g=255;
-		if(b>255) b=255;
+		if (r > 255)
+			r = 255;
+		if (g > 255)
+			g = 255;
+		if (b > 255)
+			b = 255;
 
-		rgb=(r<<16) + (g<<8) + (b<<0);
+		rgb = (r << 16) + (g << 8) + (b << 0);
 		return true;
 	}
 	return false;
 }
 
-
 int HomieDevice::GetErrorRetryFrequency()
 {
-	int iErrorDuration=(int) (millis()-ulSendErrorTimestamp);
-	if(iErrorDuration >= 20000)
+	int iErrorDuration = (int)(millis() - sendErrorTimestamp);
+	if (iErrorDuration >= 20000)
 	{
 		return 10000;
 	}
-	if(iErrorDuration >= 5000)
+	if (iErrorDuration >= 5000)
 	{
 		return 5000;
 	}
@@ -785,20 +807,44 @@ int HomieDevice::GetErrorRetryFrequency()
 
 unsigned long HomieDevice::GetUptimeSeconds_WiFi()
 {
-	return ulSecondCounter_WiFi;
+	return secondCounter_WiFi;
 }
 
 unsigned long HomieDevice::GetUptimeSeconds_MQTT()
 {
-	return ulSecondCounter_MQTT;
+	return secondCounter_MQTT;
 }
 
 unsigned long HomieDevice::GetReconnectInterval()
 {
-	unsigned long interval=5000;
-	if(ulMqttReconnectCount>=20) interval=60000;
-	else if(ulMqttReconnectCount>=15) interval=30000;
-	else if(ulMqttReconnectCount>=10) interval=20000;
-	else if(ulMqttReconnectCount>=5) interval=10000;
+	unsigned long interval = 5000;
+	if (mqttReconnectCount >= 20)
+		interval = 60000;
+	else if (mqttReconnectCount >= 15)
+		interval = 30000;
+	else if (mqttReconnectCount >= 10)
+		interval = 20000;
+	else if (mqttReconnectCount >= 5)
+		interval = 10000;
 	return interval;
+}
+
+void HomieDevice::setServer(IPAddress ip, uint8_t port, const char *username = NULL, const char *password = NULL)
+{
+	this->useIp = true;
+	this->setServerCredentials(username, password);
+	this->mqttServerIP = ip;
+	this->mqttServerPort = port;
+}
+void HomieDevice::setServer(const char *host, uint8_t port, const char *username = NULL, const char *password = NULL)
+{
+	this->useIp = false;
+	this->setServerCredentials(username, password);
+	this->mqttServerHost = host;
+	this->mqttServerPort = port;
+}
+void HomieDevice::setServerCredentials(const char *username, const char *password)
+{
+	this->mqttUsername = username;
+	this->mqttPassword = password;
 }

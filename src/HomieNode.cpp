@@ -64,56 +64,56 @@ HomieProperty::HomieProperty()
 
 void HomieProperty::SetStandardMQTT(const String & strMqttTopic)
 {
-	if(bInitialized) return;
+	if(initialized) return;
 
-	bStandardMQTT=true;
-	bRetained=false;
-	bSettable=true;
-	strTopic=strMqttTopic;
-	strSetTopic="";
+	standardMQTT=true;
+	retained=false;
+	settable=true;
+	topic=strMqttTopic;
+	setTopic="";
 
 }
 
 void HomieProperty::Init()
 {
-	if(!bStandardMQTT)
+	if(!standardMQTT)
 	{
-		strTopic=pParent->strTopic+"/"+strID;
-		strSetTopic=strTopic+"/set";
+		topic=parent->topic+"/"+id;
+		setTopic=topic+"/set";
 	}
-	bInitialized=true;
+	initialized=true;
 }
 
 void HomieProperty::DoCallback()
 {
-	for(size_t i=0;i<vecCallback.size();i++)
+	for(size_t i=0;i<callback.size();i++)
 	{
-		vecCallback[i](this);
+		callback[i](this);
 	}
 
 }
 
 void HomieProperty::AddCallback(HomiePropertyCallback cb)
 {
-	vecCallback.push_back(cb);
+	callback.push_back(cb);
 }
 
 const String & HomieProperty::GetValue()
 {
-	return strValue;
+	return value;
 }
 
 void HomieProperty::PublishDefault()
 {
-	if(bSettable && bRetained && !bReceivedRetained && !bStandardMQTT)
+	if(settable && retained && !receivedRetained && !standardMQTT)
 	{
-		bReceivedRetained=true;
-		if(strValue.length())
+		receivedRetained=true;
+		if(value.length())
 		{
 #ifdef HOMIELIB_VERBOSE
-			csprintf("%s didn't receive initial value for base topic %s so unsubscribe and publish default.\n",strFriendlyName.c_str(),strTopic.c_str());
+			csprintf("%s didn't receive initial value for base topic %s so unsubscribe and publish default.\n",friendlyName.c_str(),topic.c_str());
 #endif
-			pParent->pParent->mqtt.unsubscribe(strTopic.c_str());
+			parent->parent->mqtt.unsubscribe(topic.c_str());
 			Publish();
 		}
 	}
@@ -122,34 +122,34 @@ void HomieProperty::PublishDefault()
 
 bool HomieProperty::Publish()
 {
-	if(!bInitialized) return false;
-	if(bStandardMQTT) return false;
+	if(!initialized) return false;
+	if(standardMQTT) return false;
 
 	bool bRet=false;
-	String strPublish=strValue;
+	String strPublish=value;
 
-	if(!strPublish.length() && !bPublishEmptyString) return true;
+	if(!strPublish.length() && !publishEmptyString) return true;
 
 	if(!strPublish.length() && !HomieDataTypeAllowsEmpty(datatype))
 	{
 		strPublish=GetDefaultForHomieDataType(datatype);
 #ifdef HOMIELIB_VERBOSE
-		csprintf("Empty value for %s encountered, substituting default. ",strID.c_str());
+		csprintf("Empty value for %s encountered, substituting default. ",id.c_str());
 #endif
 	}
 
-	if(!pParent->pParent->mqtt.connected())
+	if(!parent->parent->mqtt.connected())
 	{
 #ifdef HOMIELIB_VERBOSE
-		csprintf("%s can't publish \"%s\" because not connected\n",strFriendlyName.c_str(),strPublish.c_str());
+		csprintf("%s can't publish \"%s\" because not connected\n",friendlyName.c_str(),strPublish.c_str());
 #endif
 	}
 	else
 	{
 #ifdef HOMIELIB_VERBOSE
-		csprintf("%s publishing \"%s\"\n",strFriendlyName.c_str(),strPublish.c_str());
+		csprintf("%s publishing \"%s\"\n",friendlyName.c_str(),strPublish.c_str());
 #endif
-		bRet=0!=pParent->pParent->mqtt.publish(strTopic.c_str(), 2, bRetained, strPublish.c_str(), strPublish.length());
+		bRet=0!=parent->parent->mqtt.publish(topic.c_str(), 2, retained, strPublish.c_str(), strPublish.length());
 	}
 	return bRet;
 }
@@ -204,7 +204,7 @@ bool HomieProperty::SetValueConstrained(const String & strNewValue)
 	switch(datatype)
 	{
 	default:
-		strValue=strNewValue;
+		value=strNewValue;
 		return true;
 	case homieInt:
 		{
@@ -218,13 +218,13 @@ bool HomieProperty::SetValueConstrained(const String & strNewValue)
 				if(newvalue<min || newvalue>max)
 				{
 #ifdef HOMIELIB_VERBOSE
-					csprintf("%s ignoring invalid payload %s (int out of range %i:%i)\n",strFriendlyName.c_str(),strNewValue.c_str(),min,max);
+					csprintf("%s ignoring invalid payload %s (int out of range %i:%i)\n",friendlyName.c_str(),strNewValue.c_str(),min,max);
 #endif
 					return false;
 				}
 			}
 
-			strValue=String(newvalue);
+			value=String(newvalue);
 			return true;
 		}
 		break;
@@ -239,21 +239,21 @@ bool HomieProperty::SetValueConstrained(const String & strNewValue)
 				if(newvalue<min || newvalue>max)
 				{
 #ifdef HOMIELIB_VERBOSE
-					csprintf("%s ignoring invalid payload %s (float out of range %.04f:%.04f)\n",strFriendlyName.c_str(),strNewValue.c_str(),min,max);
+					csprintf("%s ignoring invalid payload %s (float out of range %.04f:%.04f)\n",friendlyName.c_str(),strNewValue.c_str(),min,max);
 #endif
 					return false;
 				}
 			}
 
-			strValue=String(newvalue);
+			value=String(newvalue);
 			return true;
 		}
 	case homieBool:
-		if(strNewValue=="true") strValue="true"; else if(strNewValue=="false") strValue="false";
+		if(strNewValue=="true") value="true"; else if(strNewValue=="false") value="false";
 		else
 		{
 #ifdef HOMIELIB_VERBOSE
-			csprintf("%s ignoring invalid payload %s (bool needs true or false)\n",strFriendlyName.c_str(),strNewValue.c_str());
+			csprintf("%s ignoring invalid payload %s (bool needs true or false)\n",friendlyName.c_str(),strNewValue.c_str());
 #endif
 			return false;
 		}
@@ -282,13 +282,13 @@ bool HomieProperty::SetValueConstrained(const String & strNewValue)
 
 			if(bValid)
 			{
-				strValue=strNewValue;
+				value=strNewValue;
 				return true;
 			}
 			else
 			{
 #ifdef HOMIELIB_VERBOSE
-				csprintf("%s ignoring invalid payload %s (not one of %s)\n",strFriendlyName.c_str(),strNewValue.c_str(),strFormat.c_str());
+				csprintf("%s ignoring invalid payload %s (not one of %s)\n",friendlyName.c_str(),strNewValue.c_str(),strFormat.c_str());
 #endif
 				return false;
 			}
@@ -296,7 +296,7 @@ bool HomieProperty::SetValueConstrained(const String & strNewValue)
 
 		break;
 	case homieColor:
-		strValue=strNewValue;
+		value=strNewValue;
 		return true;
 		break;
 	};
@@ -323,13 +323,13 @@ void HomieProperty::OnMqttMessage(char* topic, char* payload, AsyncMqttClientMes
 			DoCallback();
 		}
 
-		if(bRetained && !strcmp(topic,strTopic.c_str()) && !bStandardMQTT)
+		if(retained && !strcmp(topic,topic.c_str()) && !standardMQTT)
 		{
 #ifdef HOMIELIB_VERBOSE
-			csprintf("%s received initial value for base topic %s. Unsubscribing.\n",strFriendlyName.c_str(),strTopic.c_str());
+			csprintf("%s received initial value for base topic %s. Unsubscribing.\n",friendlyName.c_str(),topic.c_str());
 #endif
-			pParent->pParent->mqtt.unsubscribe(topic);
-			bReceivedRetained=true;
+			parent->parent->mqtt.unsubscribe(topic);
+			receivedRetained=true;
 		}
 		else
 		{
@@ -352,7 +352,7 @@ HomieNode::HomieNode()
 void HomieNode::Init()
 {
 
-	strTopic=pParent->strTopic+"/"+strID;
+	topic=parent->topic+"/"+id;
 	for(size_t a=0;a<vecProperty.size();a++)
 	{
 		vecProperty[a]->Init();
@@ -372,7 +372,7 @@ HomieProperty * HomieNode::NewProperty()
 {
 	HomieProperty * ret=new HomieProperty;
 	vecProperty.push_back(ret);
-	ret->pParent=this;
+	ret->parent=this;
 	return ret;
 }
 

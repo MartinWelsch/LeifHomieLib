@@ -15,8 +15,8 @@
 #endif
 
 
-#ifndef MQTT_IP
-#define MQTT_IP "192.168.1.2"
+#ifndef MQTT_HOST
+#define MQTT_HOST "192.168.1.2"
 #define MQTT_USER "your-mqttuser"
 #define MQTT_PASS "your-mqttpassword"
 #endif
@@ -80,45 +80,45 @@ void setup() {
 
 		HomieNode * pNode=homie.NewNode();
 
-		pNode->strID="properties";
-		pNode->strFriendlyName="Properties";
+		pNode->id="properties";
+		pNode->friendlyName="Properties";
 //		pNode->strType="customtype";
 
 		HomieProperty * pProp;
 
 
 		pPropDoorbell=pProp=pNode->NewProperty();
-		pProp->strFriendlyName="Doorbell";
-		pProp->strID="doorbell";
-		pProp->strUnit="";
-		pProp->bRetained=false;
+		pProp->friendlyName="Doorbell";
+		pProp->id="doorbell";
+		pProp->unit="";
+		pProp->retained=false;
 		pProp->datatype=homieEnum;
 		pProp->strFormat="PRESSED,RELEASED";
 
 		pPropDoorSensor=pProp=pNode->NewProperty();
-		pProp->strFriendlyName="Door Open";
-		pProp->strID="doorsensor";
-		pProp->strUnit="";
-		pProp->bRetained=true;
+		pProp->friendlyName="Door Open";
+		pProp->id="doorsensor";
+		pProp->unit="";
+		pProp->retained=true;
 		pProp->SetBool(false);
 		pProp->datatype=homieBool;
 
 
 
 		pProp=pNode->NewProperty();
-		pProp->strID="dimmer";
+		pProp->id="dimmer";
 //		pProp->strUnit="%";
 		pProp->datatype=homieFloat;
 		pProp->strFormat="-64:64";
-		pProp->bSettable=true;
-		pProp->bRetained=true;
+		pProp->settable=true;
+		pProp->retained=true;
 		pProp->SetValue("26.3");
-		pProp->strFriendlyName="Dimmer";
+		pProp->friendlyName="Dimmer";
 		pProp->AddCallback([](HomieProperty * pSource) {
 			//this property is settable. We'll print it into the console whenever it's updated.
 			//you can set it from MQTT Explorer by publishing a number between 0-100 to homie/examplehomiedev/nodeid1/dimmer
 			//but remember to check the *retain* box.
-			Serial.printf("%s is now %s\n",pSource->strFriendlyName.c_str(),pSource->GetValue().c_str());
+			Serial.printf("%s is now %s\n",pSource->friendlyName.c_str(),pSource->GetValue().c_str());
 		});
 
 
@@ -126,36 +126,36 @@ void setup() {
 
 
 		pProp=pNode->NewProperty();
-		pProp->strID="dimmer2";
+		pProp->id="dimmer2";
 //		pProp->strUnit="%";
 		pProp->datatype=homieInt;
 		pProp->strFormat="0:100";
-		pProp->bSettable=true;
-		pProp->bRetained=true;
-		pProp->strFriendlyName="Dimmer2";
+		pProp->settable=true;
+		pProp->retained=true;
+		pProp->friendlyName="Dimmer2";
 		pProp->SetValue("50");
 		pProp->AddCallback([](HomieProperty * pSource) {
 			//this property is settable. We'll print it into the console whenever it's updated.
 			//you can set it from MQTT Explorer by publishing a number between 0-100 to homie/examplehomiedev/nodeid1/dimmer
 			//but remember to check the *retain* box.
-			Serial.printf("%s is now %s\n",pSource->strFriendlyName.c_str(),pSource->GetValue().c_str());
+			Serial.printf("%s is now %s\n",pSource->friendlyName.c_str(),pSource->GetValue().c_str());
 		});
 
 
 
 		pProp=pNode->NewProperty();
-		pProp->strFriendlyName="Test Boolean";
-		pProp->strID="testboolean";
-		pProp->strUnit="";
-		pProp->bRetained=true;
+		pProp->friendlyName="Test Boolean";
+		pProp->id="testboolean";
+		pProp->unit="";
+		pProp->retained=true;
 		pProp->datatype=homieBool;
-		pProp->bSettable=true;
+		pProp->settable=true;
 		pProp->strFormat="";
 		pProp->AddCallback([](HomieProperty * pSource) {
 			//this property is settable. We'll print it into the console whenever it's updated.
 			//you can set it from MQTT Explorer by publishing a number between 0-100 to homie/examplehomiedev/nodeid1/dimmer
 			//but remember to check the *retain* box.
-			Serial.printf("%s is now %s\n",pSource->strFriendlyName.c_str(),pSource->GetValue().c_str());
+			Serial.printf("%s is now %s\n",pSource->friendlyName.c_str(),pSource->GetValue().c_str());
 		});
 
 
@@ -195,9 +195,9 @@ void setup() {
 
 		HomieNode * pNode=homie.NewNode();
 
-		pNode->strID="nodeid2";
-		pNode->strFriendlyName="Node Two";
-		pNode->strType="customtype";
+		pNode->id="nodeid2";
+		pNode->friendlyName="Node Two";
+		pNode->type="customtype";
 
 		HomieProperty * pProp;
 
@@ -205,19 +205,19 @@ void setup() {
 		{
 
 			pProp=pNode->NewProperty();
-			pProp->strFriendlyName="Light "+String(a+1);
-			pProp->strID="light"+String(a+1);
+			pProp->friendlyName="Light "+String(a+1);
+			pProp->id="light"+String(a+1);
 
 		}
 
 	}
 
 
-	homie.strFriendlyName="Example Homie Device";
-	homie.strID="ExampleHomieDev";
-	homie.strID.toLowerCase();
+	homie.friendlyName="Example Homie Device";
+	homie.id="ExampleHomieDev";
+	homie.id.toLowerCase();
 
-	homie.strMqttServerIP=MQTT_IP;
+	homie.strMqttServerIP=MQTT_HOST;
 	homie.strMqttUserName=MQTT_USER;
 	homie.strMqttPassword=MQTT_PASS;
 
